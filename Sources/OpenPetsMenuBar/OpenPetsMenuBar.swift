@@ -611,6 +611,20 @@ final class OpenPetsMenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(items.startStopServerItem)
         menu.addItem(items.copyServerURLItem)
         menu.addItem(.separator())
+        let fontSizeItem = NSMenuItem(
+            title: "Font Size: \(fontSizeMenuTitle(configuration.display.fontSize))...",
+            action: #selector(promptForFontSize),
+            keyEquivalent: ""
+        )
+        fontSizeItem.target = self
+        menu.addItem(fontSizeItem)
+        let bubbleWidthItem = NSMenuItem(
+            title: "Bubble Width: \(pointMenuTitle(configuration.display.messageBubbleWidth))...",
+            action: #selector(promptForBubbleWidth),
+            keyEquivalent: ""
+        )
+        bubbleWidthItem.target = self
+        menu.addItem(bubbleWidthItem)
         menu.addItem(items.openConfigItem)
         menu.addItem(items.installCommandLineToolItem)
         return menu
@@ -678,6 +692,94 @@ final class OpenPetsMenuBarController: NSObject, NSMenuDelegate {
             NSWorkspace.shared.open(OpenPetsPaths.defaultConfigurationDirectory)
         } catch {
             showError("Could not open config folder", detail: error.localizedDescription)
+        }
+    }
+
+    @objc private func promptForFontSize() {
+        reloadConfiguration()
+
+        let input = NSTextField(frame: CGRect(x: 0, y: 0, width: 180, height: 24))
+        input.stringValue = fontSizeInputString(for: configuration.display.fontSize)
+        input.placeholderString = fontSizeInputString(for: OpenPetsDisplayConfiguration.defaultFontSize)
+
+        let alert = NSAlert()
+        OpenPetsAppIcon.apply(to: alert)
+        alert.messageText = "Font Size"
+        alert.informativeText = "Choose a font size from \(fontSizeInputString(for: OpenPetsDisplayConfiguration.minimumFontSize)) to \(fontSizeInputString(for: OpenPetsDisplayConfiguration.maximumFontSize)) pt."
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+        guard let enteredFontSize = Double(input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            showError("Could not update font size", detail: "Enter a number between \(fontSizeInputString(for: OpenPetsDisplayConfiguration.minimumFontSize)) and \(fontSizeInputString(for: OpenPetsDisplayConfiguration.maximumFontSize)).")
+            return
+        }
+
+        do {
+            var updatedConfiguration = try OpenPetsConfiguration.loadOrCreateDefault()
+            updatedConfiguration.display.fontSize = OpenPetsDisplayConfiguration.clampedFontSize(CGFloat(enteredFontSize))
+            try updatedConfiguration.save()
+            configuration = updatedConfiguration
+            preloadInstalledPets()
+            refreshMenu()
+        } catch {
+            showError("Could not update font size", detail: error.localizedDescription)
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await switchActivePetIfRunning()
+            } catch {
+                showError("Could not update font size", detail: error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func promptForBubbleWidth() {
+        reloadConfiguration()
+
+        let input = NSTextField(frame: CGRect(x: 0, y: 0, width: 180, height: 24))
+        input.stringValue = pointInputString(for: configuration.display.messageBubbleWidth)
+        input.placeholderString = pointInputString(for: OpenPetsDisplayConfiguration.defaultMessageBubbleWidth)
+
+        let alert = NSAlert()
+        OpenPetsAppIcon.apply(to: alert)
+        alert.messageText = "Bubble Width"
+        alert.informativeText = "Choose a bubble width from \(pointInputString(for: OpenPetsDisplayConfiguration.minimumMessageBubbleWidth)) to \(pointInputString(for: OpenPetsDisplayConfiguration.maximumMessageBubbleWidth)) pt."
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+        guard let enteredWidth = Double(input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            showError("Could not update bubble width", detail: "Enter a number between \(pointInputString(for: OpenPetsDisplayConfiguration.minimumMessageBubbleWidth)) and \(pointInputString(for: OpenPetsDisplayConfiguration.maximumMessageBubbleWidth)).")
+            return
+        }
+
+        do {
+            var updatedConfiguration = try OpenPetsConfiguration.loadOrCreateDefault()
+            updatedConfiguration.display.messageBubbleWidth = OpenPetsDisplayConfiguration.clampedMessageBubbleWidth(CGFloat(enteredWidth))
+            try updatedConfiguration.save()
+            configuration = updatedConfiguration
+            preloadInstalledPets()
+            refreshMenu()
+        } catch {
+            showError("Could not update bubble width", detail: error.localizedDescription)
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await switchActivePetIfRunning()
+            } catch {
+                showError("Could not update bubble width", detail: error.localizedDescription)
+            }
         }
     }
 
@@ -1519,6 +1621,27 @@ final class OpenPetsMenuBarController: NSObject, NSMenuDelegate {
         }
 
         return String(format: "%.2fx", value)
+    }
+
+    private func fontSizeMenuTitle(_ fontSize: CGFloat) -> String {
+        pointMenuTitle(fontSize)
+    }
+
+    private func fontSizeInputString(for fontSize: CGFloat) -> String {
+        pointInputString(for: fontSize)
+    }
+
+    private func pointMenuTitle(_ value: CGFloat) -> String {
+        "\(pointInputString(for: value)) pt"
+    }
+
+    private func pointInputString(for value: CGFloat) -> String {
+        let value = Double(value)
+        let roundedInteger = value.rounded()
+        if abs(value - roundedInteger) < 0.001 {
+            return "\(Int(roundedInteger))"
+        }
+        return String(format: "%.1f", value)
     }
 
     private func scalesMatch(_ lhs: CGFloat, _ rhs: CGFloat) -> Bool {

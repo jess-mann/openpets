@@ -4,8 +4,8 @@ Thanks for helping improve OpenPetsKit. This guide covers local setup, developme
 
 ## Requirements
 
-- macOS 14 or later.
-- Swift 6.0 or later.
+- macOS 14.5 or later.
+- Swift 6.2 or later.
 - Xcode command line tools.
 
 Check your Swift version:
@@ -81,6 +81,23 @@ When changing pet rendering or message layout, add tests for geometry helpers wh
 Pet bundles must include a `pet.json` manifest and a spritesheet with an 8x9 atlas layout. Keep contributed assets original or clearly licensed for redistribution.
 
 If you add or modify bundled assets, include provenance and licensing details in the pull request.
+
+### Optional manifest fields
+
+`pet.json` accepts optional `animationFrameDurationsMilliseconds` to override base-animation timings on a per-pet basis. Keys are `PetAnimation` raw values (`idle`, `running-right`, `running-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review`). Each array must be the same length as the default timing for that animation and contain only positive integers. Animations omitted from the map fall back to the global defaults in `PetAnimation.swift`.
+
+```json
+{
+  "id": "starcorn",
+  "displayName": "Starcorn",
+  "description": "A white chibi unicorn.",
+  "spritesheetPath": "spritesheet.webp",
+  "animationFrameDurationsMilliseconds": {
+    "idle": [375, 325, 325, 325, 325, 200],
+    "waving": [140, 140, 140, 280]
+  }
+}
+```
 
 ## Security
 

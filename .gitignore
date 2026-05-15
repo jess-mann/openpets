@@ -6,3 +6,4 @@ DerivedData/
 *.xcuserstate
 *.d
 *.dia
+.DS_Store

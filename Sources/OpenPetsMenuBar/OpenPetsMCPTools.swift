@@ -51,7 +51,7 @@ func openPetsTools() -> [Tool] {
         ),
         Tool(
             name: "wake_pet",
-            description: "Start or bring back the OpenPets desktop pet. Use this before notify or animation tools when the pet is not running.",
+            description: "Start or bring back the OpenPets desktop pet. Use this before update_bubble or animation tools when the pet is not running; notify wakes the pet automatically.",
             inputSchema: objectSchema(),
             annotations: .init(destructiveHint: false, idempotentHint: true)
         ),
@@ -97,6 +97,41 @@ func openPetsTools() -> [Tool] {
             )
         ),
         Tool(
+            name: "update_bubble",
+            description: "Update or create one OpenPets message bubble without changing the pet animation. Unlike notify, this tool does not change the pet animation and does not auto-wake the pet. Use it to update bubble text and status badge in lockstep with an externally managed animation driven by play_pet_animation or stop_pet_animation. For first-time notifications that should also drive the pet, prefer notify.",
+            inputSchema: objectSchema(
+                properties: [
+                    "title": property(type: "string", description: "Short message title shown in the pet bubble."),
+                    "text": property(
+                        type: "string",
+                        description: "Message body shown under the title. Keep it concise; use the current task result or next action."
+                    ),
+                    "status": property(
+                        type: "string",
+                        description: "Bubble badge indicator. Does not change the pet animation. Valid values: \(openPetsStatusValues.joined(separator: ", ")).",
+                        enumValues: openPetsStatusValues
+                    ),
+                    "threadId": property(
+                        type: "string",
+                        description: "Optional UUID. Omit to create a new bubble and receive a threadId; pass the returned threadId on later update_bubble calls for the same task so OpenPets replaces the right bubble."
+                    ),
+                    "url": property(
+                        type: "string",
+                        description: "Optional URL opened when the bubble action button is clicked. Use only for an actionable destination."
+                    ),
+                    "buttonLabel": property(
+                        type: "string",
+                        description: "Optional action button label, such as Open, Reply, Review, or View."
+                    ),
+                    "ttlSeconds": property(
+                        type: "number",
+                        description: "Optional number of seconds before this thread's message auto-clears. Omit to keep the message visible until another update_bubble with the same threadId replaces it or clear_pet_message clears that threadId."
+                    )
+                ],
+                required: ["title", "text", "status"]
+            )
+        ),
+        Tool(
             name: "play_pet_animation",
             description: "Play a pet animation without showing a message. Use notify instead when you need to communicate text to the user.",
             inputSchema: objectSchema(
@@ -128,7 +163,7 @@ func openPetsTools() -> [Tool] {
                 properties: [
                     "threadId": property(
                         type: "string",
-                        description: "Required UUID returned by notify for the specific task bubble to clear."
+                        description: "Required UUID returned by notify or update_bubble for the specific task bubble to clear."
                     )
                 ],
                 required: ["threadId"]
@@ -184,6 +219,27 @@ private func callOpenPetsTool(
             let response = try await controller.notifyForMCP(notification)
             return commandResult(response)
 
+        case "update_bubble":
+            guard let title = arguments["title"]?.stringValue, !title.isEmpty else {
+                return failure("Missing required string argument: title")
+            }
+            guard let text = arguments["text"]?.stringValue, !text.isEmpty else {
+                return failure("Missing required string argument: text")
+            }
+            guard let status = arguments["status"]?.stringValue, !status.isEmpty else {
+                return failure("Missing required string argument: status")
+            }
+            let notification = PetNotification(
+                title: title,
+                text: text,
+                status: status,
+                threadId: arguments["threadId"]?.stringValue,
+                url: arguments["url"]?.stringValue,
+                buttonLabel: arguments["buttonLabel"]?.stringValue,
+                ttlSeconds: number(arguments["ttlSeconds"])
+            )
+            return await commandResult(controller.sendPetCommand(.updateBubble(notification)))
+
         case "play_pet_animation":
             guard let name = arguments["name"]?.stringValue, let animation = PetAnimation(cliValue: name) else {
                 return failure("Missing or invalid animation name")
@@ -219,7 +275,7 @@ func commandResult(_ response: PetResponse) -> CallTool.Result {
         if let threadId = response.threadId, !threadId.isEmpty {
             let text = """
             threadId: \(threadId)
-            Use this threadId on your next notify call for this same task or chat thread so OpenPets updates the existing bubble instead of creating a new one.
+            Use this threadId on your next notify or update_bubble call for this same task or chat thread so OpenPets updates the existing bubble instead of creating a new one.
             """
             return CallTool.Result(
                 content: [.text(text: text, annotations: nil, _meta: nil)],

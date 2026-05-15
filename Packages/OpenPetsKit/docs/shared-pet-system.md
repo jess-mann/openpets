@@ -8,7 +8,7 @@ The default setup has three layers:
 
 1. The menu bar app owns the visible pet session.
 2. The MCP server runs inside the menu bar app and sends tool calls to that pet session.
-3. Socket clients, including CLI commands such as `notify`, `animate`, `stop-animation`, `clear`, `ping`, and Swift apps using `OpenPetsClient`, connect to the pet session through the configured Unix socket.
+3. Socket clients, including CLI commands such as `notify`, `update-bubble`, `animate`, `stop-animation`, `clear`, `ping`, and Swift apps using `OpenPetsClient`, connect to the pet session through the configured Unix socket.
 
 ```text
 MCP clients
@@ -100,6 +100,18 @@ try client.send(.notify(PetNotification(
 
 This keeps one task's bubble updated in place. If you omit `threadId` for every update, OpenPets treats each update as a separate task and creates separate bubbles.
 
+When your app manages the aggregate pet animation separately, use `.updateBubble` for bubble-only updates so per-task UI changes do not interrupt the current animation:
+
+```swift
+try client.send(.playAnimation(name: .review, loop: true))
+try client.send(.updateBubble(PetNotification(
+    title: "Export Complete",
+    text: "The customer report is ready.",
+    status: "done",
+    threadId: threadId
+)))
+```
+
 ## Threading Model
 
 The shared pet can show multiple task bubbles at once. The unit of identity is `threadId`, not the calling app.
@@ -145,9 +157,9 @@ Apps and agents using MCP should connect to the configured MCP URL:
 http://127.0.0.1:3001/mcp
 ```
 
-The menu bar app starts the MCP server and wakes the pet automatically for `notify`. MCP clients should still treat `threadId` the same way as socket clients:
+The menu bar app starts the MCP server and wakes the pet automatically for `notify`. Use `update_bubble` for bubble-only updates that must not wake the pet or change the current animation. MCP clients should still treat `threadId` the same way as socket clients:
 
-1. First `notify` for a task omits `threadId`.
+1. First `notify` or `update_bubble` for a task omits `threadId`.
 2. The response returns a `threadId`.
 3. Later updates for the same task pass that `threadId`.
 
@@ -155,7 +167,7 @@ The MCP server is local by default. Binding it to `0.0.0.0`, `::`, or an empty h
 
 ## Practical Guidance
 
-Prefer `notify` for meaningful user-visible task state: running work, completion, failure, waiting states, and review requests. Prefer `play_pet_animation` only for visual feedback that does not need text.
+Prefer `notify` for one-shot user-visible task state when the bubble status should also drive the pet animation. Prefer `update_bubble` when a client already manages aggregate animation with `play_pet_animation` and `stop_pet_animation`, such as keeping the pet in `review` while several task bubbles update independently. Prefer `play_pet_animation` only for visual feedback that does not need text.
 
 Use concise titles and concrete status text. The pet is shared across apps, so messages should identify the actual operation well enough for the user to understand which tool or task changed.
 

@@ -52,6 +52,7 @@ public extension PetNotification {
 
 public enum PetCommand: Equatable, Sendable {
     case notify(PetNotification)
+    case updateBubble(PetNotification)
     case playAnimation(name: PetAnimation, loop: Bool?, ttlSeconds: Double?)
     case stopAnimation
     case clearMessage(threadId: String)
@@ -72,6 +73,7 @@ extension PetCommand: Codable {
 
     private enum CommandType: String, Codable {
         case notify
+        case updateBubble
         case playAnimation
         case stopAnimation
         case clearMessage
@@ -87,6 +89,8 @@ extension PetCommand: Codable {
         switch type {
         case .notify:
             self = .notify(try container.decode(PetNotification.self, forKey: .notification))
+        case .updateBubble:
+            self = .updateBubble(try container.decode(PetNotification.self, forKey: .notification))
         case .playAnimation:
             self = .playAnimation(
                 name: try container.decode(PetAnimation.self, forKey: .name),
@@ -112,6 +116,9 @@ extension PetCommand: Codable {
         switch self {
         case .notify(let notification):
             try container.encode(CommandType.notify, forKey: .type)
+            try container.encode(notification, forKey: .notification)
+        case .updateBubble(let notification):
+            try container.encode(CommandType.updateBubble, forKey: .type)
             try container.encode(notification, forKey: .notification)
         case .playAnimation(let name, let loop, let ttlSeconds):
             try container.encode(CommandType.playAnimation, forKey: .type)

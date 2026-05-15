@@ -47,6 +47,10 @@ public struct PetBundle: Sendable {
         self.atlas = atlas
     }
 
+    public func frameDurationsMilliseconds(for animation: PetAnimation) -> [Int] {
+        manifest.frameDurationsMilliseconds(for: animation)
+    }
+
     public static func load(from directoryURL: URL) throws -> PetBundle {
         let manifest = try loadManifest(from: directoryURL)
         let spritesheetURL = directoryURL.appendingPathComponent(manifest.spritesheetPath)

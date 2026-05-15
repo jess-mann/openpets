@@ -204,6 +204,10 @@ public final class OpenPetsHostSession {
         controller?.petManifest
     }
 
+    var debugCurrentAnimation: PetAnimation? {
+        controller?.debugCurrentAnimation
+    }
+
     public init(
         configuration: OpenPetsHostConfiguration,
         terminatesApplicationOnShutdown: Bool = false,
@@ -349,6 +353,13 @@ public final class OpenPetsHostSession {
             let resolvedNotification = notification.resolvingThreadId()
             controller.apply(.notify(resolvedNotification))
             return PetResponse(ok: true, threadId: resolvedNotification.threadId)
+        case .updateBubble(let notification):
+            guard let controller else {
+                return PetResponse(ok: false, message: "pet is not running")
+            }
+            let resolvedNotification = notification.resolvingThreadId()
+            controller.apply(.updateBubble(resolvedNotification))
+            return PetResponse(ok: true, threadId: resolvedNotification.threadId)
         default:
             guard let controller else {
                 return PetResponse(ok: false, message: "pet is not running")
@@ -407,6 +418,15 @@ private final class PetHostCommandBridge: @unchecked Sendable {
             DispatchQueue.main.async { [self] in
                 Task { @MainActor in
                     session.handle(.notify(resolvedNotification))
+                }
+            }
+            return response
+        case .updateBubble(let notification):
+            let resolvedNotification = notification.resolvingThreadId()
+            response = PetResponse(ok: true, threadId: resolvedNotification.threadId)
+            DispatchQueue.main.async { [self] in
+                Task { @MainActor in
+                    session.handle(.updateBubble(resolvedNotification))
                 }
             }
             return response
@@ -574,6 +594,8 @@ private final class PetHostController {
     private let surfacePanel: NSPanel
     private let surfaceView: PetSurfacePanelView
     private let messageAreaHeight: CGFloat
+    private let fontSize: CGFloat
+    private let messageBubbleWidth: CGFloat
     private let legacyContentSize: CGSize
     private let spriteSize: CGSize
     private let stableSpriteBounds: CGRect
@@ -607,6 +629,10 @@ private final class PetHostController {
         petBundle.manifest
     }
 
+    var debugCurrentAnimation: PetAnimation {
+        currentAnimation
+    }
+
     init(
         petAssets: PetHostAssets,
         display: OpenPetsDisplayConfiguration,
@@ -618,6 +644,8 @@ private final class PetHostController {
         self.petBundle = petBundle
         self.positionStore = positionStore
         messageAreaHeight = max(display.messageAreaHeight, 108)
+        fontSize = display.fontSize
+        messageBubbleWidth = display.messageBubbleWidth
 
         let frames = petAssets.frames
         surfacePalette = petAssets.surfacePalette
@@ -640,9 +668,11 @@ private final class PetHostController {
         )
         messageView = PetMessagePanelView(
             petSize: stableSpriteBounds.size,
-            messageAreaHeight: messageAreaHeight
+            messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
+            messageBubbleWidth: messageBubbleWidth
         )
-        surfaceView = PetSurfacePanelView(palette: surfacePalette)
+        surfaceView = PetSurfacePanelView(palette: surfacePalette, fontSize: fontSize)
 
         let contentSize = petView.bounds.size
         let initialOrigin = PetWindowPositioning.initialWindowOrigin(
@@ -795,17 +825,14 @@ private final class PetHostController {
     func apply(_ command: PetCommand) {
         switch command {
         case .notify(let notification):
-            let resolvedNotification = notification.resolvingThreadId()
-            setBubble(
-                bubble(for: resolvedNotification),
-                threadId: resolvedNotification.threadId ?? UUID().uuidString,
-                ttlSeconds: resolvedNotification.ttlSeconds
-            )
+            applyBubbleUpdate(notification)
             if let finiteAnimation = finiteAnimation(forStatusKind: notification.status) {
                 play(finiteAnimation, loopCount: 3, ttlSeconds: nil)
             } else {
                 play(animation(forStatusKind: notification.status), loop: true, ttlSeconds: notification.ttlSeconds)
             }
+        case .updateBubble(let notification):
+            applyBubbleUpdate(notification)
         case .playAnimation(let name, let loop, let ttlSeconds):
             play(name, loop: loop ?? true, ttlSeconds: ttlSeconds)
         case .stopAnimation:
@@ -817,6 +844,15 @@ private final class PetHostController {
         case .ping, .shutdown:
             break
         }
+    }
+
+    private func applyBubbleUpdate(_ notification: PetNotification) {
+        let resolvedNotification = notification.resolvingThreadId()
+        setBubble(
+            bubble(for: resolvedNotification),
+            threadId: resolvedNotification.threadId ?? UUID().uuidString,
+            ttlSeconds: resolvedNotification.ttlSeconds
+        )
     }
 
     func savePosition() {
@@ -1412,7 +1448,8 @@ private final class PetHostController {
 
     private func scheduleNextFrame() {
         animationTimer?.invalidate()
-        let durations = currentReactionKind.flatMap { reactionFrameDurations[$0] } ?? currentAnimation.frameDurationsMilliseconds
+        let durations = currentReactionKind.flatMap { reactionFrameDurations[$0] }
+            ?? petBundle.frameDurationsMilliseconds(for: currentAnimation)
         let duration = Double(durations[min(currentFrameIndex, durations.count - 1)]) / 1000
         animationTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -1577,7 +1614,7 @@ struct PetBubble: Equatable {
     var detail: String?
     var indicator: PetBubbleIndicator
     var action: PetBubbleAction? = nil
-    var detailLineLimit: Int? = 2
+    var detailLineLimit: Int? = nil
 }
 
 struct PetBubbleAction: Equatable {
@@ -1643,17 +1680,20 @@ final class PetSurfacePanelView: NSView {
     private var surfaceRevealState: OpenPetsSurfaceRevealState?
     private var hotspotFrames: [String: CGRect] = [:]
     private let palette: OpenPetsPetSurfacePalette
+    private let fontSize: CGFloat
     private lazy var hostingView = SurfaceHostingView(rootView: OpenPetsSurfaceOverlayView(
         resolvedSurfaces: [],
         petFrame: .zero,
         cursorPoint: nil,
         revealState: nil,
         hotspotFrames: [:],
-        palette: palette
+        palette: palette,
+        fontSize: fontSize
     ))
 
-    init(palette: OpenPetsPetSurfacePalette = .fallback) {
+    init(palette: OpenPetsPetSurfacePalette = .fallback, fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize) {
         self.palette = palette
+        self.fontSize = fontSize
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -1761,7 +1801,8 @@ final class PetSurfacePanelView: NSView {
             cursorPoint: cursorPoint,
             revealState: surfaceRevealState,
             hotspotFrames: hotspotFrames,
-            palette: palette
+            palette: palette,
+            fontSize: fontSize
         )
     }
 
@@ -1805,6 +1846,7 @@ private struct OpenPetsSurfaceOverlayView: View {
     let revealState: OpenPetsSurfaceRevealState?
     let hotspotFrames: [String: CGRect]
     let palette: OpenPetsPetSurfacePalette
+    let fontSize: CGFloat
 
     private var overlaySurfaces: [OpenPetsResolvedSurface] {
         resolvedSurfaces.filter { resolved in
@@ -1847,7 +1889,8 @@ private struct OpenPetsSurfaceOverlayView: View {
         OpenPetsCloudHotspotSurfaceView(
             surface: resolved.update,
             visibility: visibility(for: resolved),
-            palette: palette
+            palette: palette,
+            fontSize: fontSize
         )
         .frame(width: OpenPetsSurfaceHotspotLayout.widgetSize.width, height: OpenPetsSurfaceHotspotLayout.widgetSize.height)
         .position(position(for: resolved, in: size))
@@ -2451,6 +2494,7 @@ private struct OpenPetsCloudHotspotSurfaceView: View {
     let surface: OpenPetsSurfaceUpdate
     let visibility: OpenPetsHotspotVisibility
     let palette: OpenPetsPetSurfacePalette
+    let fontSize: CGFloat
 
     var body: some View {
         ZStack {
@@ -2462,10 +2506,10 @@ private struct OpenPetsCloudHotspotSurfaceView: View {
 
             HStack(spacing: 5) {
                 Image(systemName: surface.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: max(8, fontSize - 2), weight: .medium))
                     .symbolRenderingMode(.monochrome)
                 Text(surface.value)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: fontSize, weight: .medium, design: .rounded))
                     .lineLimit(1)
                     .monospacedDigit()
             }
@@ -2659,12 +2703,16 @@ final class PetMessagePanelView: NSView {
             layout: .empty,
             cardFrames: [],
             messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
+            messageBubbleWidth: messageBubbleWidth,
             onDismiss: { _ in },
             onToggle: {}
         ))
     }()
     private let petSize: CGSize
     private let messageAreaHeight: CGFloat
+    private let fontSize: CGFloat
+    private let messageBubbleWidth: CGFloat
     private let closedModeRevealDurationNanoseconds: UInt64
     private var messageStack = PetMessageStack()
     private var isMessageStackCollapsed = false
@@ -2691,10 +2739,14 @@ final class PetMessagePanelView: NSView {
     init(
         petSize: CGSize,
         messageAreaHeight: CGFloat,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize,
+        messageBubbleWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth,
         closedModeRevealDurationNanoseconds: UInt64 = 5_000_000_000
     ) {
         self.petSize = petSize
         self.messageAreaHeight = messageAreaHeight
+        self.fontSize = fontSize
+        self.messageBubbleWidth = messageBubbleWidth
         self.closedModeRevealDurationNanoseconds = closedModeRevealDurationNanoseconds
         super.init(frame: .zero)
         wantsLayer = true
@@ -2813,7 +2865,9 @@ final class PetMessagePanelView: NSView {
             hiddenMessageCount: messageStack.hiddenMessageCount(),
             isCollapsed: isEffectivelyCollapsed,
             petSize: petSize,
-            messageAreaHeight: messageAreaHeight
+            messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
+            messageBubbleWidth: messageBubbleWidth
         )
         setFrameSize(currentMessageLayout.containerSize)
         bubbleView.frame = bounds
@@ -2839,6 +2893,8 @@ final class PetMessagePanelView: NSView {
             layout: layout,
             cardFrames: layout.cardFrames,
             messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
+            messageBubbleWidth: messageBubbleWidth,
             onDismiss: { [weak self] threadId in
                 self?.onDismissMessage?(threadId)
             },
@@ -2942,7 +2998,7 @@ struct OpenPetsMessageLayout {
     static let stackGap: CGFloat = 8
     static let toggleGapBelowCard: CGFloat = 4
     static let sideInset: CGFloat = 12
-    static let maxCardWidth: CGFloat = 260
+    static let maxCardWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth
     static let closeButtonSize = CGSize(width: 22, height: 22)
     static let closeButtonInset: CGFloat = 8
     static let empty = OpenPetsMessageLayout(
@@ -2988,7 +3044,9 @@ struct OpenPetsMessageLayout {
         isCollapsed: Bool,
         containerWidth: CGFloat,
         spriteSize: CGSize,
-        messageAreaHeight: CGFloat
+        messageAreaHeight: CGFloat,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize,
+        messageBubbleWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth
     ) -> OpenPetsMessageLayout {
         _ = isCollapsed
         return make(
@@ -2997,7 +3055,9 @@ struct OpenPetsMessageLayout {
             isCollapsed: isCollapsed,
             containerWidth: containerWidth,
             spriteSize: spriteSize,
-            messageAreaHeight: messageAreaHeight
+            messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
+            messageBubbleWidth: messageBubbleWidth
         )
     }
 
@@ -3008,9 +3068,11 @@ struct OpenPetsMessageLayout {
         isCollapsed: Bool = false,
         containerWidth: CGFloat,
         spriteSize: CGSize,
-        messageAreaHeight: CGFloat
+        messageAreaHeight: CGFloat,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize,
+        messageBubbleWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth
     ) -> OpenPetsMessageLayout {
-        let cardMaxWidth = min(maxCardWidth, max(1, containerWidth - sideInset * 2))
+        let cardMaxWidth = min(messageBubbleWidth, max(1, containerWidth - sideInset * 2))
         let rightEdge = containerWidth - sideInset
         let spriteFrame = CGRect(
             x: rightEdge - spriteSize.width,
@@ -3025,7 +3087,8 @@ struct OpenPetsMessageLayout {
             let cardSize = OpenPetsBubbleContentView.size(
                 for: message.bubble,
                 maxWidth: cardMaxWidth,
-                messageAreaHeight: messageAreaHeight
+                messageAreaHeight: messageAreaHeight,
+                fontSize: fontSize
             )
             cardFrames.append(CGRect(
                 x: rightEdge - cardSize.width,
@@ -3080,7 +3143,9 @@ struct OpenPetsMessageLayout {
         isCollapsed: Bool = false,
         spriteSize: CGSize,
         stableSpriteBounds: CGRect,
-        messageAreaHeight: CGFloat
+        messageAreaHeight: CGFloat,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize,
+        messageBubbleWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth
     ) -> OpenPetsMessageLayout {
         _ = hiddenMessageCount
         let petSize = CGSize(
@@ -3090,8 +3155,9 @@ struct OpenPetsMessageLayout {
         let cardSizes = isCollapsed ? [] : messages.map {
             OpenPetsBubbleContentView.size(
                 for: $0.bubble,
-                maxWidth: maxCardWidth,
-                messageAreaHeight: messageAreaHeight
+                maxWidth: messageBubbleWidth,
+                messageAreaHeight: messageAreaHeight,
+                fontSize: fontSize
             )
         }
         let widestCard = cardSizes.map(\.width).max() ?? 0
@@ -3159,7 +3225,9 @@ struct OpenPetsMessageLayout {
         hiddenMessageCount: Int,
         isCollapsed: Bool = false,
         petSize: CGSize,
-        messageAreaHeight: CGFloat
+        messageAreaHeight: CGFloat,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize,
+        messageBubbleWidth: CGFloat = OpenPetsDisplayConfiguration.defaultMessageBubbleWidth
     ) -> OpenPetsMessageLayout {
         _ = hiddenMessageCount
         guard !messages.isEmpty else { return .empty }
@@ -3167,8 +3235,9 @@ struct OpenPetsMessageLayout {
         let cardSizes = isCollapsed ? [] : messages.map {
             OpenPetsBubbleContentView.size(
                 for: $0.bubble,
-                maxWidth: maxCardWidth,
-                messageAreaHeight: messageAreaHeight
+                maxWidth: messageBubbleWidth,
+                messageAreaHeight: messageAreaHeight,
+                fontSize: fontSize
             )
         }
         let widestCard = cardSizes.map(\.width).max() ?? 0
@@ -3279,6 +3348,8 @@ private struct OpenPetsMessageView: View {
     let layout: OpenPetsMessageLayout
     let cardFrames: [CGRect]
     let messageAreaHeight: CGFloat
+    let fontSize: CGFloat
+    let messageBubbleWidth: CGFloat
     let onDismiss: (String) -> Void
     let onToggle: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -3292,6 +3363,7 @@ private struct OpenPetsMessageView: View {
                             OpenPetsDismissibleBubbleView(
                                 message: message,
                                 messageAreaHeight: messageAreaHeight,
+                                fontSize: fontSize,
                                 onDismiss: onDismiss
                             )
                                 .position(swiftUIPosition(for: frame))
@@ -3352,6 +3424,7 @@ private struct OpenPetsMessageView: View {
 private struct OpenPetsDismissibleBubbleView: View {
     let message: PetMessage
     let messageAreaHeight: CGFloat
+    let fontSize: CGFloat
     let onDismiss: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
@@ -3360,6 +3433,7 @@ private struct OpenPetsDismissibleBubbleView: View {
         OpenPetsBubbleContentView(
             bubble: message.bubble,
             messageAreaHeight: messageAreaHeight,
+            fontSize: fontSize,
             showsAction: isHovered
         )
             .overlay(alignment: .topLeading) {
@@ -3406,6 +3480,7 @@ private struct OpenPetsDismissibleBubbleView: View {
 private struct OpenPetsBubbleContentView: View {
     let bubble: PetBubble
     var messageAreaHeight: CGFloat = 84
+    var fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize
     var showsAction = true
     @Environment(\.colorScheme) private var colorScheme
 
@@ -3437,7 +3512,7 @@ private struct OpenPetsBubbleContentView: View {
     }
 
     private var bubbleSize: CGSize {
-        Self.size(for: bubble, messageAreaHeight: messageAreaHeight)
+        Self.size(for: bubble, messageAreaHeight: messageAreaHeight, fontSize: fontSize)
     }
 
     private var bubbleContent: some View {
@@ -3445,7 +3520,7 @@ private struct OpenPetsBubbleContentView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(bubble.title)
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: fontSize + 0.5, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -3454,7 +3529,7 @@ private struct OpenPetsBubbleContentView: View {
 
                     if let detail = bubble.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 12.5, weight: .regular))
+                            .font(.system(size: max(8, fontSize - 0.5), weight: .regular))
                             .foregroundStyle(.primary)
                             .lineLimit(bubble.detailLineLimit)
                             .truncationMode(.tail)
@@ -3494,20 +3569,26 @@ private struct OpenPetsBubbleContentView: View {
         .opacity.combined(with: .offset(y: 2))
     }
 
-    static func size(for bubble: PetBubble, maxWidth: CGFloat = 260, messageAreaHeight: CGFloat = 84) -> CGSize {
-        let width = min(260, maxWidth)
+    static func size(
+        for bubble: PetBubble,
+        maxWidth: CGFloat = 260,
+        messageAreaHeight: CGFloat = 84,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize
+    ) -> CGSize {
+        let width = max(1, maxWidth)
         let maxHeight = messageAreaHeight - 12
         guard let detail = bubble.detail, !detail.isEmpty else {
-            return CGSize(width: width, height: min(maxHeight, 44))
+            return CGSize(width: width, height: min(maxHeight, max(44, fontSize + 31)))
         }
 
         let bodyLineCount = measuredBodyLineCount(
             for: detail,
             bubbleWidth: width,
-            lineLimit: bubble.detailLineLimit
+            lineLimit: bubble.detailLineLimit,
+            fontSize: fontSize
         )
-        let oneLineBodyHeight: CGFloat = 56
-        let bodyLineHeight: CGFloat = 16
+        let oneLineBodyHeight = max(56, fontSize + 43)
+        let bodyLineHeight = max(16, fontSize + 3)
         let desiredHeight = oneLineBodyHeight + CGFloat(bodyLineCount - 1) * bodyLineHeight
         let height = bubble.detailLineLimit == nil ? desiredHeight : min(maxHeight, desiredHeight)
         return CGSize(
@@ -3516,9 +3597,15 @@ private struct OpenPetsBubbleContentView: View {
         )
     }
 
-    private static func measuredBodyLineCount(for detail: String, bubbleWidth: CGFloat, lineLimit: Int?) -> Int {
+    private static func measuredBodyLineCount(
+        for detail: String,
+        bubbleWidth: CGFloat,
+        lineLimit: Int?,
+        fontSize: CGFloat = OpenPetsDisplayConfiguration.defaultFontSize
+    ) -> Int {
         let bodyWidth = max(1, bubbleWidth - 54)
-        let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+        let bodyFontSize = max(8, fontSize - 0.5)
+        let font = NSFont.systemFont(ofSize: bodyFontSize, weight: .regular)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
         let rect = NSString(string: detail).boundingRect(
@@ -3529,7 +3616,7 @@ private struct OpenPetsBubbleContentView: View {
                 .paragraphStyle: paragraph
             ]
         )
-        let bodyLineHeight: CGFloat = 15
+        let bodyLineHeight = max(15, bodyFontSize + 2.5)
         let measuredLineCount = max(1, Int(ceil((rect.height - 0.5) / bodyLineHeight)))
         guard let lineLimit else {
             return measuredLineCount
@@ -3547,7 +3634,7 @@ private struct OpenPetsBubbleContentView: View {
             action.open(source: "button")
         } label: {
             Text(action.label)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.system(size: max(8, fontSize - 2.5), weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(.primary)
@@ -4146,6 +4233,8 @@ private struct OpenPetsMessagingPreviewGallery: View {
                     layout: layout,
                     cardFrames: layout.cardFrames,
                     messageAreaHeight: 84,
+                    fontSize: OpenPetsDisplayConfiguration.defaultFontSize,
+                    messageBubbleWidth: OpenPetsDisplayConfiguration.defaultMessageBubbleWidth,
                     onDismiss: { _ in },
                     onToggle: {}
                 )

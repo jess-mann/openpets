@@ -183,32 +183,36 @@ final class OpenPetsTests: XCTestCase {
 
     @MainActor
     func testMenusIncludeGallerySettingsAssistantConnectionAndVersion() throws {
-        let controller = OpenPetsMenuBarController()
-        let menu = controller.makeStatusItemMenu()
-        let titles = menuItemTitles(menu)
+        try withTemporaryXDGConfigHome {
+            let controller = OpenPetsMenuBarController()
+            let menu = controller.makeStatusItemMenu()
+            let titles = menuItemTitles(menu)
 
-        XCTAssertTrue(titles.contains("Install Pets..."))
-        XCTAssertTrue(titles.contains("Plugins"))
-        XCTAssertTrue(titles.contains("Connect Assistants..."))
-        XCTAssertFalse(titles.contains("Set Up AI Assistants..."))
-        XCTAssertFalse(titles.contains("Install CLI"))
+            XCTAssertTrue(titles.contains("Install Pets..."))
+            XCTAssertTrue(titles.contains("Plugins"))
+            XCTAssertTrue(titles.contains("Connect Assistants..."))
+            XCTAssertFalse(titles.contains("Set Up AI Assistants..."))
+            XCTAssertFalse(titles.contains("Install CLI"))
 
-        let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "Settings" })
-        let settingsMenu = try XCTUnwrap(settingsItem.submenu)
-        XCTAssertEqual(
-            menuItemTitles(settingsMenu),
-            [
-                "Server Status: Stopped",
-                "Start MCP Server",
-                "Copy MCP URL",
-                "<separator>",
-                "Open Config Folder",
-                "Install CLI Tool"
-            ]
-        )
+            let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "Settings" })
+            let settingsMenu = try XCTUnwrap(settingsItem.submenu)
+            XCTAssertEqual(
+                menuItemTitles(settingsMenu),
+                [
+                    "Server Status: Stopped",
+                    "Start MCP Server",
+                    "Copy MCP URL",
+                    "<separator>",
+                    "Font Size: 13 pt...",
+                    "Bubble Width: 260 pt...",
+                    "Open Config Folder",
+                    "Install CLI Tool"
+                ]
+            )
 
-        let versionItem = try XCTUnwrap(menu.items.first { $0.title.hasPrefix("Version ") })
-        XCTAssertFalse(versionItem.isEnabled)
+            let versionItem = try XCTUnwrap(menu.items.first { $0.title.hasPrefix("Version ") })
+            XCTAssertFalse(versionItem.isEnabled)
+        }
     }
 
     @MainActor
@@ -457,6 +461,8 @@ final class OpenPetsTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(descriptions["notify"]).contains("Different concurrent tasks or agents"))
         XCTAssertTrue(try XCTUnwrap(descriptions["notify"]).contains("automatically wakes the pet"))
         XCTAssertTrue(try XCTUnwrap(descriptions["notify"]).contains("returns the current OpenPets status"))
+        XCTAssertTrue(try XCTUnwrap(descriptions["update_bubble"]).contains("does not change the pet animation"))
+        XCTAssertTrue(try XCTUnwrap(descriptions["update_bubble"]).contains("does not auto-wake the pet"))
         XCTAssertTrue(try XCTUnwrap(descriptions["play_pet_animation"]).contains("Use notify instead"))
         XCTAssertTrue(try XCTUnwrap(descriptions["stop_pet_animation"]).contains("return the visible pet to idle"))
         XCTAssertTrue(try XCTUnwrap(descriptions["stop_pet_animation"]).contains("without stopping, hiding, or clearing pet messages"))
@@ -482,6 +488,26 @@ final class OpenPetsTests: XCTestCase {
         XCTAssertTrue(urlDescription.contains("Optional URL"))
     }
 
+    func testMCPToolsListIncludesUpdateBubble() {
+        XCTAssertTrue(openPetsTools().map(\.name).contains("update_bubble"))
+    }
+
+    func testMCPUpdateBubbleSchema() throws {
+        XCTAssertEqual(try schemaRequired(toolName: "update_bubble"), ["title", "text", "status"])
+
+        let statusSchema = try schemaProperty(toolName: "update_bubble", propertyName: "status")
+        let statusDescription = try XCTUnwrap(statusSchema["description"]?.stringValue)
+        let enumValues = try XCTUnwrap(statusSchema["enum"]?.arrayValue?.compactMap(\.stringValue))
+        XCTAssertEqual(enumValues, openPetsStatusValues)
+        XCTAssertTrue(statusDescription.contains("Does not change the pet animation"))
+
+        let threadSchema = try schemaProperty(toolName: "update_bubble", propertyName: "threadId")
+        let threadDescription = try XCTUnwrap(threadSchema["description"]?.stringValue)
+        XCTAssertEqual(threadSchema["type"]?.stringValue, "string")
+        XCTAssertTrue(threadDescription.contains("create a new bubble"))
+        XCTAssertTrue(threadDescription.contains("replaces the right bubble"))
+    }
+
     func testMCPNotifyResultReturnsThreadStructuredContent() throws {
         let threadId = "11111111-1111-4111-8111-111111111111"
         let result = commandResult(PetResponse(ok: true, threadId: threadId))
@@ -495,8 +521,16 @@ final class OpenPetsTests: XCTestCase {
             return
         }
         XCTAssertTrue(text.contains("threadId: \(threadId)"))
-        XCTAssertTrue(text.contains("Use this threadId on your next notify call"))
+        XCTAssertTrue(text.contains("Use this threadId on your next notify or update_bubble call"))
         XCTAssertTrue(text.contains("updates the existing bubble"))
+        XCTAssertEqual(result.structuredContent?.objectValue?["threadId"]?.stringValue, threadId)
+    }
+
+    func testMCPUpdateBubbleResultReturnsThreadStructuredContent() throws {
+        let threadId = "22222222-2222-4222-8222-222222222222"
+        let result = commandResult(PetResponse(ok: true, threadId: threadId))
+
+        XCTAssertFalse(result.isError ?? false)
         XCTAssertEqual(result.structuredContent?.objectValue?["threadId"]?.stringValue, threadId)
     }
 

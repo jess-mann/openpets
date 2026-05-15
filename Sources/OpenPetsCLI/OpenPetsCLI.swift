@@ -76,6 +76,29 @@ struct OpenPetsCLI {
                 socketPath: parsed.values["socket"] ?? userConfiguration.socketPath
             )
 
+        case "update-bubble":
+            let userConfiguration = try OpenPetsConfiguration.loadOrCreateDefault()
+            let parsed = parseOptionsAndPositionals(Array(arguments.dropFirst()))
+            guard let title = parsed.values["title"], !title.isEmpty else {
+                throw CLIError.missingRequiredOption("--title")
+            }
+            guard let status = parsed.values["status"], !status.isEmpty else {
+                throw CLIError.missingRequiredOption("--status")
+            }
+            let text = parsed.values["text"] ?? parsed.positionals.joined(separator: " ")
+            try send(
+                .updateBubble(PetNotification(
+                    title: title,
+                    text: text.isEmpty ? nil : text,
+                    status: status,
+                    threadId: parsed.values["thread"],
+                    url: parsed.values["url"],
+                    buttonLabel: parsed.values["button"],
+                    ttlSeconds: parsed.values["ttl"].flatMap(Double.init)
+                )),
+                socketPath: parsed.values["socket"] ?? userConfiguration.socketPath
+            )
+
         case "animate":
             let userConfiguration = try OpenPetsConfiguration.loadOrCreateDefault()
             let parsed = parseOptionsAndPositionals(Array(arguments.dropFirst()))
@@ -147,6 +170,7 @@ struct OpenPetsCLI {
               openpets run --pet /Users/sam/.codex/pets/starcorn [--socket PATH] [--scale 0.42]
               openpets install URL_OR_PET_ID [--no-activate]
               openpets notify --title TITLE --status KIND [--text TEXT] [--thread UUID] [--url URL] [--button LABEL] [--ttl SECONDS] [--socket PATH]
+              openpets update-bubble --title TITLE --status KIND [--text TEXT] [--thread UUID] [--url URL] [--button LABEL] [--ttl SECONDS] [--socket PATH]
               openpets animate ANIMATION [--loop|--once] [--ttl SECONDS] [--socket PATH]
               openpets clear --thread UUID [--socket PATH]
               openpets stop-animation [--socket PATH]

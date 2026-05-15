@@ -68,6 +68,7 @@ OpenPets exposes local MCP tools from the menu bar app:
 | `wake_pet`            | Start or bring back the desktop pet.                                     |
 | `stop_pet`            | Stop the desktop pet.                                                    |
 | `notify`              | Show or update a threaded message bubble with a status-driven animation. |
+| `update_bubble`       | Show or update a threaded message bubble without changing animation.     |
 | `play_pet_animation`  | Play an animation without showing text.                                  |
 | `stop_pet_animation`  | Return the pet to idle without stopping it or clearing messages.         |
 | `clear_pet_message`   | Clear one message bubble by `threadId`.                                  |
@@ -75,7 +76,7 @@ OpenPets exposes local MCP tools from the menu bar app:
 
 Valid notification statuses are `running`, `review`, `done`, `failed`, `waiting`, and `message`.
 
-The shared pet can show multiple task bubbles at once. A `notify` call returns a `threadId`; pass that ID back on later updates to replace the same task bubble instead of creating a new one.
+The shared pet can show multiple task bubbles at once. A `notify` or `update_bubble` call returns a `threadId`; pass that ID back on later updates to replace the same task bubble instead of creating a new one. Use `update_bubble` when another tool is managing the pet animation through `play_pet_animation` and `stop_pet_animation`.
 
 See [Shared Pet System](./docs/shared-pet-system.md) for the default socket topology, MCP behavior, `threadId` workflow, and guidance for app integrations.
 
@@ -288,6 +289,12 @@ The command prints a `threadId`. Pass it back with `--thread` to replace that ta
 
 ```sh
 openpets notify --thread THREAD_ID --title "Build Passed" --status done --text "All tests completed."
+```
+
+Update a bubble without changing the current animation:
+
+```sh
+openpets update-bubble --thread THREAD_ID --title "Build Passed" --status done --text "All tests completed."
 ```
 
 Play an animation:

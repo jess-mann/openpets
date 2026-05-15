@@ -6,19 +6,26 @@ public struct PetManifest: Codable, Equatable, Sendable {
     public var description: String
     public var spritesheetPath: String
     public var reactionAnimations: [OpenPetsPetReactionAnimation]
+    public var animationFrameDurationsMilliseconds: [PetAnimation: [Int]]
 
     public init(
         id: String,
         displayName: String,
         description: String,
         spritesheetPath: String,
-        reactionAnimations: [OpenPetsPetReactionAnimation] = []
+        reactionAnimations: [OpenPetsPetReactionAnimation] = [],
+        animationFrameDurationsMilliseconds: [PetAnimation: [Int]] = [:]
     ) {
         self.id = id
         self.displayName = displayName
         self.description = description
         self.spritesheetPath = spritesheetPath
         self.reactionAnimations = reactionAnimations
+        self.animationFrameDurationsMilliseconds = animationFrameDurationsMilliseconds
+    }
+
+    public func frameDurationsMilliseconds(for animation: PetAnimation) -> [Int] {
+        animationFrameDurationsMilliseconds[animation] ?? animation.frameDurationsMilliseconds
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -27,6 +34,7 @@ public struct PetManifest: Codable, Equatable, Sendable {
         case description
         case spritesheetPath
         case reactionAnimations
+        case animationFrameDurationsMilliseconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -39,6 +47,68 @@ public struct PetManifest: Codable, Equatable, Sendable {
             [OpenPetsPetReactionAnimation].self,
             forKey: .reactionAnimations
         ) ?? []
+        animationFrameDurationsMilliseconds = try Self.decodeAnimationFrameDurations(
+            from: container,
+            forKey: .animationFrameDurationsMilliseconds
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(description, forKey: .description)
+        try container.encode(spritesheetPath, forKey: .spritesheetPath)
+        try container.encode(reactionAnimations, forKey: .reactionAnimations)
+        if !animationFrameDurationsMilliseconds.isEmpty {
+            let rawKeyed = Dictionary(
+                uniqueKeysWithValues: animationFrameDurationsMilliseconds.map { ($0.key.rawValue, $0.value) }
+            )
+            try container.encode(rawKeyed, forKey: .animationFrameDurationsMilliseconds)
+        }
+    }
+
+    private static func decodeAnimationFrameDurations(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> [PetAnimation: [Int]] {
+        guard let raw = try container.decodeIfPresent([String: [Int]].self, forKey: key) else {
+            return [:]
+        }
+
+        var resolved: [PetAnimation: [Int]] = [:]
+        for (rawKey, durations) in raw {
+            guard let animation = PetAnimation(rawValue: rawKey) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: container,
+                    debugDescription: "Unknown animation key '\(rawKey)' in animationFrameDurationsMilliseconds"
+                )
+            }
+
+            let expectedCount = animation.frameDurationsMilliseconds.count
+            guard durations.count == expectedCount else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: container,
+                    debugDescription: """
+                    animationFrameDurationsMilliseconds['\(rawKey)'] must have \(expectedCount) entries to match the \
+                    default frame count, got \(durations.count)
+                    """
+                )
+            }
+
+            guard durations.allSatisfy({ $0 > 0 }) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: container,
+                    debugDescription: "animationFrameDurationsMilliseconds['\(rawKey)'] entries must be positive"
+                )
+            }
+
+            resolved[animation] = durations
+        }
+        return resolved
     }
 }
 

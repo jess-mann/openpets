@@ -28,6 +28,114 @@ final class OpenPetsTests: XCTestCase {
         XCTAssertTrue(manifest.reactionAnimations.isEmpty)
     }
 
+    func testDecodePetManifestWithAnimationFrameDurations() throws {
+        let data = Data(
+            """
+            {
+              "id": "starcorn",
+              "displayName": "Starcorn",
+              "description": "A white chibi unicorn.",
+              "spritesheetPath": "spritesheet.webp",
+              "animationFrameDurationsMilliseconds": {
+                "idle": [400, 350, 350, 350, 350, 200],
+                "waving": [120, 120, 120, 240]
+              }
+            }
+            """.utf8
+        )
+
+        let manifest = try JSONDecoder().decode(PetManifest.self, from: data)
+
+        XCTAssertEqual(manifest.animationFrameDurationsMilliseconds[.idle], [400, 350, 350, 350, 350, 200])
+        XCTAssertEqual(manifest.animationFrameDurationsMilliseconds[.waving], [120, 120, 120, 240])
+        XCTAssertEqual(manifest.frameDurationsMilliseconds(for: .idle), [400, 350, 350, 350, 350, 200])
+        XCTAssertEqual(
+            manifest.frameDurationsMilliseconds(for: .runningRight),
+            PetAnimation.runningRight.frameDurationsMilliseconds,
+            "Animations without an override should fall back to the global default"
+        )
+    }
+
+    func testDecodePetManifestRejectsAnimationFrameDurationLengthMismatch() {
+        let data = Data(
+            """
+            {
+              "id": "starcorn",
+              "displayName": "Starcorn",
+              "description": "A white chibi unicorn.",
+              "spritesheetPath": "spritesheet.webp",
+              "animationFrameDurationsMilliseconds": {
+                "idle": [400, 350, 350]
+              }
+            }
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try JSONDecoder().decode(PetManifest.self, from: data)) { error in
+            guard case DecodingError.dataCorrupted(let context) = error else {
+                return XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+            }
+            XCTAssertTrue(context.debugDescription.contains("idle"))
+            XCTAssertTrue(context.debugDescription.contains("\(PetAnimation.idle.frameDurationsMilliseconds.count)"))
+        }
+    }
+
+    func testDecodePetManifestRejectsUnknownAnimationKey() {
+        let data = Data(
+            """
+            {
+              "id": "starcorn",
+              "displayName": "Starcorn",
+              "description": "A white chibi unicorn.",
+              "spritesheetPath": "spritesheet.webp",
+              "animationFrameDurationsMilliseconds": {
+                "tap-dancing": [120, 120, 120, 120]
+              }
+            }
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try JSONDecoder().decode(PetManifest.self, from: data)) { error in
+            guard case DecodingError.dataCorrupted(let context) = error else {
+                return XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+            }
+            XCTAssertTrue(context.debugDescription.contains("tap-dancing"))
+        }
+    }
+
+    func testDecodePetManifestRejectsNonPositiveFrameDurations() {
+        let data = Data(
+            """
+            {
+              "id": "starcorn",
+              "displayName": "Starcorn",
+              "description": "A white chibi unicorn.",
+              "spritesheetPath": "spritesheet.webp",
+              "animationFrameDurationsMilliseconds": {
+                "idle": [400, 0, 350, 350, 350, 200]
+              }
+            }
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try JSONDecoder().decode(PetManifest.self, from: data))
+    }
+
+    func testPetManifestRoundTripsAnimationFrameDurations() throws {
+        let manifest = PetManifest(
+            id: "starcorn",
+            displayName: "Starcorn",
+            description: "A white chibi unicorn.",
+            spritesheetPath: "spritesheet.webp",
+            animationFrameDurationsMilliseconds: [.idle: [400, 350, 350, 350, 350, 200]]
+        )
+
+        let encoded = try JSONEncoder().encode(manifest)
+        let decoded = try JSONDecoder().decode(PetManifest.self, from: encoded)
+
+        XCTAssertEqual(decoded, manifest)
+    }
+
     func testDecodePetManifestWithReactionAnimations() throws {
         let data = Data(
             """
@@ -106,9 +214,49 @@ final class OpenPetsTests: XCTestCase {
     func testIdleAnimationUsesCalmBreathingTiming() {
         let idleLoopDuration = PetAnimation.idle.frameDurationsMilliseconds.reduce(0, +)
 
-        XCTAssertEqual(idleLoopDuration, 8_000)
-        XCTAssertGreaterThanOrEqual(PetAnimation.idle.frameDurationsMilliseconds.first ?? 0, 2_000)
-        XCTAssertGreaterThanOrEqual(PetAnimation.idle.frameDurationsMilliseconds.last ?? 0, 2_600)
+        XCTAssertEqual(idleLoopDuration, 1_875)
+        XCTAssertLessThanOrEqual(PetAnimation.idle.frameDurationsMilliseconds.max() ?? 0, 375)
+        XCTAssertGreaterThanOrEqual(PetAnimation.idle.frameDurationsMilliseconds.min() ?? 0, 200)
+    }
+
+    func testDisplayConfigurationDecodesDefaultFontSize() throws {
+        let data = Data(
+            """
+            {
+              "scale": 0.5,
+              "messageAreaHeight": 96
+            }
+            """.utf8
+        )
+
+        let configuration = try JSONDecoder().decode(OpenPetsDisplayConfiguration.self, from: data)
+
+        XCTAssertEqual(configuration.scale, 0.5)
+        XCTAssertEqual(configuration.messageAreaHeight, 96)
+        XCTAssertEqual(configuration.fontSize, OpenPetsDisplayConfiguration.defaultFontSize)
+        XCTAssertEqual(configuration.messageBubbleWidth, OpenPetsDisplayConfiguration.defaultMessageBubbleWidth)
+    }
+
+    func testDisplayConfigurationClampsFontSize() {
+        XCTAssertEqual(
+            OpenPetsDisplayConfiguration(fontSize: 4).fontSize,
+            OpenPetsDisplayConfiguration.minimumFontSize
+        )
+        XCTAssertEqual(
+            OpenPetsDisplayConfiguration(fontSize: 40).fontSize,
+            OpenPetsDisplayConfiguration.maximumFontSize
+        )
+    }
+
+    func testDisplayConfigurationClampsMessageBubbleWidth() {
+        XCTAssertEqual(
+            OpenPetsDisplayConfiguration(messageBubbleWidth: 100).messageBubbleWidth,
+            OpenPetsDisplayConfiguration.minimumMessageBubbleWidth
+        )
+        XCTAssertEqual(
+            OpenPetsDisplayConfiguration(messageBubbleWidth: 600).messageBubbleWidth,
+            OpenPetsDisplayConfiguration.maximumMessageBubbleWidth
+        )
     }
 
     @MainActor
@@ -234,7 +382,7 @@ final class OpenPetsTests: XCTestCase {
     }
 
     @MainActor
-    func testMessageBubbleCapsDetailTextToTwoBodyLines() {
+    func testMessageBubbleExpandsForLongDetailText() {
         let oneLineDetail = PetBubble(
             title: "Codex 5h",
             detail: "Remaining: 99%",
@@ -274,7 +422,37 @@ final class OpenPetsTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(twoLineLayout.cardFrame.height, oneLineLayout.cardFrame.height)
-        XCTAssertEqual(threeLineLayout.cardFrame.height, twoLineLayout.cardFrame.height)
+        XCTAssertGreaterThan(threeLineLayout.cardFrame.height, twoLineLayout.cardFrame.height)
+    }
+
+    @MainActor
+    func testMessageBubbleUsesConfiguredWidth() {
+        let bubble = PetBubble(
+            title: "Codex 5h",
+            detail: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt.",
+            indicator: .none
+        )
+
+        let narrowLayout = OpenPetsMessageLayout.make(
+            messages: [PetMessage(threadId: "narrow", bubble: bubble)],
+            hiddenMessageCount: 0,
+            containerWidth: 500,
+            spriteSize: CGSize(width: 112, height: 126),
+            messageAreaHeight: 180,
+            messageBubbleWidth: 220
+        )
+        let wideLayout = OpenPetsMessageLayout.make(
+            messages: [PetMessage(threadId: "wide", bubble: bubble)],
+            hiddenMessageCount: 0,
+            containerWidth: 500,
+            spriteSize: CGSize(width: 112, height: 126),
+            messageAreaHeight: 180,
+            messageBubbleWidth: 360
+        )
+
+        XCTAssertEqual(narrowLayout.cardFrame.width, 220)
+        XCTAssertEqual(wideLayout.cardFrame.width, 360)
+        XCTAssertGreaterThan(narrowLayout.cardFrame.height, wideLayout.cardFrame.height)
     }
 
     @MainActor
@@ -1370,6 +1548,15 @@ final class OpenPetsTests: XCTestCase {
                 buttonLabel: "Review",
                 ttlSeconds: 30
             )),
+            .updateBubble(PetNotification(
+                title: "Review done",
+                text: "The review bubble can update without changing animation.",
+                status: "done",
+                threadId: "22222222-2222-4222-8222-222222222222",
+                url: "https://example.com/review?id=456",
+                buttonLabel: "Open",
+                ttlSeconds: 10
+            )),
             .playAnimation(name: .waving, loop: false, ttlSeconds: 1),
             .stopAnimation,
             .clearMessage(threadId: "11111111-1111-4111-8111-111111111111"),
@@ -1450,6 +1637,41 @@ final class OpenPetsTests: XCTestCase {
         XCTAssertEqual(stack.activeMessages, [])
         XCTAssertEqual(stack.visibleMessages(), [])
         XCTAssertEqual(stack.hiddenMessageCount(), 0)
+    }
+
+    @MainActor
+    func testUpdateBubbleAndClearMessageDoNotChangeCurrentAnimation() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let petDirectory = directory.appendingPathComponent("Pet", isDirectory: true)
+        try makePetBundle(id: "animation-state-test", at: petDirectory)
+        let socketPath = "/tmp/openpets-\(UUID().uuidString.prefix(8)).sock"
+        let positionStoreURL = directory.appendingPathComponent("positions.json")
+        let session = OpenPetsHostSession(
+            configuration: OpenPetsHostConfiguration(
+                petDirectoryURL: petDirectory,
+                socketPath: socketPath,
+                display: OpenPetsDisplayConfiguration(scale: 0.1),
+                positionStoreURL: positionStoreURL
+            )
+        )
+        try session.start()
+        defer { session.stop() }
+
+        XCTAssertTrue(session.handle(.playAnimation(name: .review, loop: true, ttlSeconds: nil)).ok)
+        XCTAssertEqual(session.debugCurrentAnimation, .review)
+
+        let updateResponse = session.handle(.updateBubble(PetNotification(
+            title: "Review done",
+            text: "Bubble badge changed without animation.",
+            status: "done"
+        )))
+        XCTAssertTrue(updateResponse.ok)
+        let threadId = try XCTUnwrap(updateResponse.threadId)
+        XCTAssertEqual(session.debugCurrentAnimation, .review)
+
+        XCTAssertTrue(session.handle(.clearMessage(threadId: threadId)).ok)
+        XCTAssertEqual(session.debugCurrentAnimation, .review)
     }
 
     func testUnixSocketClientServerFraming() throws {
