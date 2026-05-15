@@ -188,8 +188,7 @@ struct OpenPetsMenuBarPetLibrary {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent(".build", isDirectory: true)
-            .appendingPathComponent("checkouts", isDirectory: true)
+            .appendingPathComponent("Packages", isDirectory: true)
             .appendingPathComponent("OpenPetsKit", isDirectory: true)
             .appendingPathComponent("Sources/OpenPetsKit/Resources/Pets/starcorn", isDirectory: true)
     }

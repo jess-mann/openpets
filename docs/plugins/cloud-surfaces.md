@@ -112,15 +112,11 @@ Separate plugin repositories should wait until OpenPets ships an external plugin
 
 ## Release Checklist
 
-Before tagging OpenPetsKit:
-
-- Review the public names for cloud surface and reaction APIs.
-- Publish OpenPetsKit as a minor feature release.
-- Suggested commit: `feat: add cloud plugin surfaces`.
-
 Before tagging OpenPets:
 
-- Replace the development `../openpetskit` package dependency with the published OpenPetsKit version.
+- Review the public names for cloud surface and reaction APIs.
+- Confirm the root package uses the vendored `Packages/OpenPetsKit` dependency.
+- Run both root tests and `swift test --package-path Packages/OpenPetsKit`.
 - Keep the battery, Claude Code, and Codex Usage plugins enabled as first-party built-in plugins.
 - Keep this document clear that plugin support is built-in/PR-based for now.
 - Suggested commit: `feat: add battery cloud surface plugin`.

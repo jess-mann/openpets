@@ -45,9 +45,10 @@ swift run openpets run --pet /path/to/starcorn
 
 - `Sources/OpenPetsCLI`: Command-line interface.
 - `Sources/OpenPetsMenuBar`: Menu bar app and MCP HTTP server/tools.
+- `Packages/OpenPetsKit`: Vendored SwiftPM library for the embeddable runtime, IPC, animation, configuration, host UI, and bundled Starcorn pet.
 - `Tests/OpenPetsTests`: Unit tests for the CLI, menu bar app, assistant setup, release packaging, and MCP tool metadata.
 
-The embeddable runtime, IPC, animation, configuration, host UI, and bundled Starcorn pet live in the separate `OpenPetsKit` package at `https://github.com/alterhq/OpenPetsKit`.
+The root package depends on `OpenPetsKit` through the local SwiftPM path `Packages/OpenPetsKit`.
 
 ## Development Workflow
 
