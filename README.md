@@ -6,7 +6,7 @@ It gives Codex Pets a shared home outside one assistant. The menu bar app, MCP s
 
 https://github.com/user-attachments/assets/a12fc67e-c82c-488c-9480-e51826995c75
 
-This repository is the desktop app, CLI, MCP server, assistant setup, and release packaging project. If you are embedding OpenPets in your own Swift app, use [OpenPetsKit](https://github.com/alterhq/OpenPetsKit), the separate Swift package for the embeddable runtime and client APIs.
+This repository contains the desktop app, CLI, MCP server, assistant setup, release packaging, and a vendored copy of OpenPetsKit under `Packages/OpenPetsKit`. If you are embedding OpenPets in your own Swift app, use [OpenPetsKit](https://github.com/alterhq/OpenPetsKit), the Swift package for the embeddable runtime and client APIs.
 
 ## Install
 
@@ -82,7 +82,7 @@ See [Shared Pet System](./docs/shared-pet-system.md) for the default socket topo
 
 ## Swift App Integration
 
-Swift apps should use [OpenPetsKit](https://github.com/alterhq/OpenPetsKit), the separate Swift package for embedding OpenPets. It contains the embeddable runtime, client APIs, and bundled Starcorn pet with minimal dependencies.
+Swift apps should use [OpenPetsKit](https://github.com/alterhq/OpenPetsKit), the Swift package for embedding OpenPets. It contains the embeddable runtime, client APIs, and bundled Starcorn pet with minimal dependencies. This repository vendors OpenPetsKit locally in `Packages/OpenPetsKit` for OpenPets app development.
 
 In Xcode, add OpenPetsKit as a package dependency:
 
@@ -93,7 +93,7 @@ https://github.com/alterhq/OpenPetsKit.git
 In a `Package.swift` file, add OpenPetsKit to `dependencies`:
 
 ```swift
-.package(url: "https://github.com/alterhq/OpenPetsKit.git", from: "0.1.0")
+.package(url: "https://github.com/alterhq/OpenPetsKit.git", from: "0.2.1")
 ```
 
 Then add the library product to the target that should send pet commands:
@@ -125,7 +125,7 @@ print(response.threadId ?? "")
 
 ## Development
 
-Source builds require Swift 6.0 or later and Xcode command line tools.
+Source builds require Swift 6.x and Xcode command line tools. This repository pins Swift 6.2 in `.swift-version`.
 
 From a local checkout, build the package:
 
@@ -174,14 +174,21 @@ Default configuration:
 
 ```json
 {
+  "activePetID": "starcorn",
+  "disabledPluginIDs": [],
   "display": {
+    "fontSize": 13,
     "messageAreaHeight": 56,
+    "messageBubbleWidth": 260,
     "scale": 0.42
   },
+  "enabledPluginIDs": [],
   "mcpEndpoint": "/mcp",
   "mcpHost": "127.0.0.1",
   "mcpPort": 3001,
-  "socketPath": "/tmp/openpets-UID.sock"
+  "petScalesByID": {},
+  "socketPath": "/tmp/openpets-UID.sock",
+  "surfaceSlotOverridesByID": {}
 }
 ```
 
@@ -189,10 +196,17 @@ Settings:
 
 - `display.scale`: Sprite display scale.
 - `display.messageAreaHeight`: Reserved height for the message bubble area.
+- `display.fontSize`: Message bubble and surface text size, clamped from 9 to 24.
+- `display.messageBubbleWidth`: Message bubble width, clamped from 200 to 420.
 - `socketPath`: Unix socket used by the CLI and pet host.
 - `mcpHost`: HTTP bind host for the MCP server.
 - `mcpPort`: HTTP port for the MCP server.
 - `mcpEndpoint`: HTTP path for the MCP endpoint.
+- `activePetID`: Pet bundle ID the menu bar app should wake by default.
+- `petScalesByID`: Per-pet display scale overrides keyed by pet ID.
+- `enabledPluginIDs`: Built-in plugin IDs explicitly enabled by the user.
+- `disabledPluginIDs`: Built-in plugin IDs explicitly disabled by the user.
+- `surfaceSlotOverridesByID`: Per-plugin cloud-surface slot overrides.
 
 By default, the MCP server only listens on `127.0.0.1`. Binding to `0.0.0.0`, `::`, or an empty host can expose the MCP server to other devices on your network. Only do this on trusted networks.
 
@@ -247,9 +261,14 @@ Manifest format:
   "id": "my-pet",
   "displayName": "My Pet",
   "description": "A short description.",
-  "spritesheetPath": "spritesheet.webp"
+  "spritesheetPath": "spritesheet.webp",
+  "animationFrameDurationsMilliseconds": {
+    "idle": [375, 325, 325, 325, 325, 200]
+  }
 }
 ```
+
+`animationFrameDurationsMilliseconds` is optional. When present, keys must be valid animation names, each duration must be positive, and each array must match that animation's frame count. Missing animations use OpenPets' default timings.
 
 Spritesheets are expected to use an 8 column by 9 row atlas. The current animation rows are:
 
